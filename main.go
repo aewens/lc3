@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -13,7 +14,7 @@ import (
 )
 
 type FlagState struct {
-	Program chan string
+	Program chan int
 }
 
 func cleanup() {
@@ -38,7 +39,26 @@ func catch(err error) {
 	}
 }
 
-func readLines(path string, lines chan string) {
+func any(xs ...bool) bool {
+	for _, x := range xs {
+		if x {
+			return true
+		}
+	}
+
+	return false
+}
+
+func lineToInts(line string, program chan int) {
+	for _, field := range strings.Fields(line) {
+		value, err := strconv.Atoi(field)
+		catch(err)
+
+		program <- value
+	}
+}
+
+func readLines(path string, program chan int) {
 	file, err := os.Open(path)
 	catch(err)
 
@@ -47,10 +67,8 @@ func readLines(path string, lines chan string) {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		lines <- line
+		lineToInts(line, program)
 	}
-
-	close(lines)
 
 	err = scanner.Err()
 	catch(err)
@@ -58,22 +76,28 @@ func readLines(path string, lines chan string) {
 
 func parseFlags() *FlagState {
 	state := &FlagState{
-		Program: make(chan string),
+		Program: make(chan int),
 	}
 
 	fileFlag := flag.String("f", "", "Path to program to run")
 	programFlag := flag.String("p", "", "Program to run")
+	rawFlag := flag.String("r", "", "Provide raw instructions to run")
 
 	hasFileFlag := len(*fileFlag) > 0
 	hasProgramFlag := len(*programFlag) > 0
+	hasRawFlag := len(*rawFlag) > 0
 
-	if !hasFileFlag && !hasProgramFlag {
-		log.Fatal("[!] Missing -p or -f flag")
+	if !any(hasFileFlag, hasProgramFlag, hasRawFlag) {
+		log.Fatal("[!] Missing -p, -f, or -r flag")
 		return state
 	}
 
-	if hasFileFlag && hasProgramFlag {
-		log.Fatal("[!] Cannot use both -p and -f flags together")
+	if any(
+		hasFileFlag && hasProgramFlag,
+		hasFileFlag && hasRawFlag,
+		hasProgramFlag && hasRawFlag,
+	) {
+		log.Fatal("[!] Cannot use -p, -f, and/or -r flags together")
 		return state
 	}
 
@@ -82,10 +106,13 @@ func parseFlags() *FlagState {
 	} else if hasProgramFlag {
 		lines := strings.Split(*programFlag, "\n")
 		for _, line := range lines {
-			state.Program <- line
+			lineToInts(line, state.Program)
 		}
+	} else if hasRawFlag {
+		lineToInts(*rawFlag, state.Program)
 	}
 
+	close(state.Program)
 	return state
 }
 
@@ -95,11 +122,6 @@ func main() {
 
 	state := parseFlags()
 	computer := vm.New()
-	output := computer.Run(state.Program)
-
-	log.Print("Output:")
-	for _, out := range output {
-		log.Printf(" %d", out)
-	}
-	log.Println()
+	computer.LoadImage(state.Program)
+	computer.Run()
 }

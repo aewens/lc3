@@ -7,14 +7,14 @@ import (
 const MEMORY_LOCATIONS = 65536
 
 const (
-	R_R0 int = iota
-	R_R1
-	R_R2
-	R_R3
-	R_R4
-	R_R5
-	R_R6
-	R_R7
+	R_0 int = iota
+	R_1
+	R_2
+	R_3
+	R_4
+	R_5
+	R_6
+	R_7
 	R_PC   // Program Counter Register
 	R_COND // Condition Register
 	R_COUNT
@@ -92,7 +92,7 @@ func (self *LC3) signExtend(value int, bits int) int {
 }
 
 func (self *LC3) updateFlags(index int) {
-	if index < 0 || index > R_R7 {
+	if index < 0 || index > R_7 {
 		panic(fmt.Sprintf("Invalid register for flag update: %d", index))
 	}
 
@@ -108,6 +108,42 @@ func (self *LC3) updateFlags(index int) {
 	}
 
 	self.Registers[R_COND] = FL_P
+}
+
+func (self *LC3) Add(instruction int) {
+	/*
+		Encoding:
+		a. Register Mode - FEDC|BA9|876|5|43|210
+			* Bits F-C: 0001 (opcode)
+			* Bits B-9: DR
+			* Bits 8-6: SR1
+			* Bits _-5: 0 (Register Mode)
+			* Bits 4-3: 00 (unused)
+			* Bits 2-0: SR2
+		b. Immediate Mode - FEDC|BA9|876|5|43210
+			* Bits F-C: 0001 (opcode)
+			* Bits B-9: DR
+			* Bits 8-6: SR1
+			* Bits _-5: 1 (Immediate Mode)
+			* Bits 4-0: IM5
+	*/
+
+	dr := (instruction >> 0x9) & 0b111
+	self.checkRegister(dr)
+
+	sr1 := (instruction >> 0x6) & 0b111
+	self.checkRegister(sr1)
+
+	mode := (instruction >> 0x5) & 0b1
+	if mode == 1 {
+		im5 := self.signExtend(instruction&0b11111, 5)
+		self.Registers[dr] = self.Registers[sr1] + im5
+	} else {
+		sr2 := instruction & 0b111
+		self.Registers[dr] = self.Registers[sr1] + self.Registers[sr2]
+	}
+
+	self.updateFlags(dr)
 }
 
 func (self *LC3) Step() {
@@ -140,39 +176,7 @@ func (self *LC3) Step() {
 	*/
 	switch op {
 	case OP_ADD:
-		/*
-			ADD Encoding:
-			a. Register Mode - FEDC|BA9|876|5|43|210
-				* Bits F-C: 0001 (opcode)
-				* Bits B-9: DR
-				* Bits 8-6: SR1
-				* Bits _-5: 0 (Register Mode)
-				* Bits 4-3: 00 (unused)
-				* Bits 2-0: SR2
-			b. Immediate Mode - FEDC|BA9|876|5|43210
-				* Bits F-C: 0001 (opcode)
-				* Bits B-9: DR
-				* Bits 8-6: SR1
-				* Bits _-5: 1 (Immediate Mode)
-				* Bits 4-0: IM5
-		*/
-
-		dr := (instruction >> 0x9) & 0b111
-		self.checkRegister(dr)
-
-		sr1 := (instruction >> 0x6) & 0b111
-		self.checkRegister(sr1)
-
-		mode := (instruction >> 0x5) & 0b1
-		if mode == 1 {
-			im5 := self.signExtend(instruction&0b11111, 5)
-			self.Registers[dr] = self.Registers[sr1] + im5
-		} else {
-			sr2 := instruction & 0b111
-			self.Registers[dr] = self.Registers[sr1] + self.Registers[sr2]
-		}
-
-		self.updateFlags(dr)
+		self.Add(instruction)
 	//case OP_AND:
 	//case OP_NOT:
 	//case OP_BR:
@@ -195,10 +199,12 @@ func (self *LC3) Step() {
 	}
 }
 
-func (self *LC3) Run(program chan string) []int {
+func (self *LC3) Run() {
 	for !self.Halted {
 		self.Step()
 	}
+}
 
-	return []int{}
+func (self *LC3) LoadImage(program chan int) {
+	<-program
 }
