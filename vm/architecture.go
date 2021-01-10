@@ -81,6 +81,11 @@ func (self *LC3) readMemory(location int) int {
 	return self.Memory[location]
 }
 
+func (self *LC3) readMemoryIndirect(indirectLocation int) int {
+	location := self.readMemory(indirectLocation)
+	return self.readMemory(location)
+}
+
 func (self *LC3) signExtend(value int, bits int) int {
 	// Check if value is negative / if first bit is a 1 using 2's complement
 	if (value>>(bits-1))&1 == 1 {
@@ -109,6 +114,15 @@ func (self *LC3) updateFlags(index int) {
 
 	self.Registers[R_COND] = FL_P
 }
+
+/*
+	Terminology:
+	* DR: Destination Register (from R0 to R7)
+	* SR1: Source Register #1 (from R0 to R7)
+	* SR2: Source Register #2 (from R0 to R7)
+	* IM5: 5-bit Immediate Value; int4 (-16 to 15)
+	* O09: Offset PC by 9; int9 (-256 to 255)
+*/
 
 func (self *LC3) Add(instruction int) {
 	/*
@@ -146,6 +160,25 @@ func (self *LC3) Add(instruction int) {
 	self.updateFlags(dr)
 }
 
+func (self *LC3) LoadIndirect(instruction int) {
+	/*
+		Encoding:
+		FEDC|BA9|876543210
+		* Bits F-C: 0001 (opcode)
+		* Bits B-9: DR
+		* Bits 8-0: O09
+	*/
+
+	dr := (instruction >> 0x9) & 0b111
+	self.checkRegister(dr)
+	offset := self.signExtend(instruction&0b111111111, 9)
+	counter := self.Registers[R_PC]
+	value := self.readMemoryIndirect(counter + offset)
+	self.Registers[dr] = value
+
+	self.updateFlags(dr)
+}
+
 func (self *LC3) Step() {
 	if self.Halted {
 		return
@@ -166,14 +199,6 @@ func (self *LC3) Step() {
 
 		So bits 12 through 15 has the opcode, which is why we bit shift by 12
 	*/
-
-	/*
-		Terminology:
-		* DR: Destination Register (from R0 to R7)
-		* SR1: Source Register #1 (from R0 to R7)
-		* SR2: Source Register #2 (from R0 to R7)
-		* IM5: 5-bit Immediate Value; uint5 (0 to 32) or int4 (-16 to 15)
-	*/
 	switch op {
 	case OP_ADD:
 		self.Add(instruction)
@@ -183,7 +208,8 @@ func (self *LC3) Step() {
 	//case OP_JMP:
 	//case OP_JSR:
 	//case OP_LD:
-	//case OP_LDI:
+	case OP_LDI:
+		self.LoadIndirect(instruction)
 	//case OP_LDR:
 	//case OP_LEA:
 	//case OP_ST:
